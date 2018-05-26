@@ -12,6 +12,7 @@ import (
 	"time"
 	"image"
 	"image/png"
+	"io/ioutil"
 )
 
 const connectionsCount = 20
@@ -34,17 +35,27 @@ type heavyRequest struct {
 	channel chan *image.Gray
 }
 
+type mandelbrot struct {
+	cacheDir string
+	queue chan heavyRequest
+}
+
 func main() {
 	l, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Fatalf("Listen: %v\n", err)
 	}
 	l = netutil.LimitListener(l, connectionsCount)
-	defer l.Close()
 
+	cacheDir, errCache := ioutil.TempDir("./", "cache")
+	if errCache!= nil {
+		log.Fatalf("failed to create a deirectory to store the images: %v", errCache)
+	}
 	heavyRequests := make(chan heavyRequest)
-	go heavyRequestsProcessor(heavyRequests)
-	http.HandleFunc("/", createHandler(heavyRequests))
+	mandelbrot := mandelbrot{cacheDir, heavyRequests}
+
+	go mandelbrot.heavyRequestsProcessor()
+	http.HandleFunc("/", mandelbrot.handler)
 	serverErr := http.Serve(l, nil)
 	if serverErr!= nil {
 		close(heavyRequests)
@@ -52,32 +63,30 @@ func main() {
 	}
 }
 
-func heavyRequestsProcessor(queue chan heavyRequest) {
-	for heavyRequest := range queue {
+func (m mandelbrot) heavyRequestsProcessor() {
+	for heavyRequest := range m.queue {
 		time.Sleep(20 * time.Second)
-		heavyRequest.channel <- foo(heavyRequest.params)
+		heavyRequest.channel <- m.calculateImage(heavyRequest.params)
 	}
 }
 
-func createHandler(queue chan heavyRequest) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		params, err := parseParams(r.URL.Query())
-		if err!=nil {
-			log.Println("400:", err)
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf("400: %v", err)))
-			return
-		}
-
-		if (params.res == resolutions["small"]) || (params.res == resolutions["medium"]) {
-			sendImage(w, foo(params))
-			return
-		}
-
-		channel := make(chan *image.Gray)
-		queue <- heavyRequest{params, channel}
-		sendImage(w, <- channel)
+func (m mandelbrot) handler(w http.ResponseWriter, r *http.Request) {
+	params, err := parseParams(r.URL.Query())
+	if err!=nil {
+		log.Println("400:", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(fmt.Sprintf("400: %v", err)))
+		return
 	}
+
+	if (params.res == resolutions["small"]) || (params.res == resolutions["medium"]) {
+		sendImage(w, m.calculateImage(params))
+		return
+	}
+
+	channel := make(chan *image.Gray)
+	m.queue <- heavyRequest{params, channel}
+	sendImage(w, <- channel)
 }
 
 func sendImage(w http.ResponseWriter, img *image.Gray) {
@@ -149,6 +158,24 @@ func parseRes(sRes string) (int, error) {
 	return res, nil
 }
 
-func foo(params params) *image.Gray {
-	return image.NewGray(image.Rect(0, 0, params.res, params.res))
+func (m mandelbrot) calculateImage(params params) *image.Gray {
+	img := image.NewGray(image.Rect(0, 0, params.res, params.res))
+	//imgNameParts := []string{
+	//	strconv.FormatFloat(params.x, 'E', -1, 64),
+	//	strconv.FormatFloat(params.y, 'E', -1, 64),
+	//	strconv.FormatUint(params.zoom, 10),
+	//	strconv.Itoa(params.res),
+	//}
+	//imgName := strings.Join(imgNameParts, "-")
+	//imgPath := filepath.Join(m.cacheDir, fmt.Sprintf("%s.png", imgName))
+	//f, err := os.Create("img.jpg")
+	//if err != nil {
+	//	panic(err)
+	//}
+	//defer f.Close()
+	//jpeg.Encode(f, target, nil)
+	//if err != nil {
+	//	log.Println("failed to store an image", imgPath, err)
+	//}
+	return img
 }
