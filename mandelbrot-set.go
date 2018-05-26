@@ -10,6 +10,8 @@ import (
 	"golang.org/x/net/netutil"
 	"net/url"
 	"time"
+	"image"
+	"image/png"
 )
 
 const connectionsCount = 20
@@ -29,7 +31,7 @@ type params struct {
 
 type heavyRequest struct {
 	params params
-	channel chan string
+	channel chan *image.Gray
 }
 
 func main() {
@@ -61,19 +63,28 @@ func createHandler(queue chan heavyRequest) func(http.ResponseWriter, *http.Requ
 	return func(w http.ResponseWriter, r *http.Request) {
 		params, err := parseParams(r.URL.Query())
 		if err!=nil {
+			log.Println("400:", err)
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(fmt.Sprintf("400: %v", err)))
 			return
 		}
 
 		if (params.res == resolutions["small"]) || (params.res == resolutions["medium"]) {
-			fmt.Fprintf(w, foo(params))
+			sendImage(w, foo(params))
 			return
 		}
 
-		channel := make(chan string)
+		channel := make(chan *image.Gray)
 		queue <- heavyRequest{params, channel}
-		fmt.Fprintf(w, <- channel)
+		sendImage(w, <- channel)
+	}
+}
+
+func sendImage(w http.ResponseWriter, img *image.Gray) {
+	w.Header().Set("Content-Type", "image/png")
+	err := png.Encode(w, img)
+	if err != nil {
+		log.Println("failed to encode an image:", err)
 	}
 }
 
@@ -138,6 +149,6 @@ func parseRes(sRes string) (int, error) {
 	return res, nil
 }
 
-func foo(params params) string {
-	return "foo"
+func foo(params params) *image.Gray {
+	return image.NewGray(image.Rect(0, 0, params.res, params.res))
 }
