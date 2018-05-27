@@ -13,6 +13,9 @@ import (
 	"image"
 	"image/png"
 	"io/ioutil"
+	"strings"
+	"path/filepath"
+	"os"
 )
 
 const connectionsCount = 20
@@ -51,6 +54,7 @@ func main() {
 	if errCache!= nil {
 		log.Fatalf("failed to create a deirectory to store the images: %v", errCache)
 	}
+	defer os.RemoveAll(cacheDir)
 	heavyRequests := make(chan heavyRequest)
 	mandelbrot := mandelbrot{cacheDir, heavyRequests}
 
@@ -71,29 +75,57 @@ func (m mandelbrot) heavyRequestsProcessor() {
 }
 
 func (m mandelbrot) handler(w http.ResponseWriter, r *http.Request) {
-	params, err := parseParams(r.URL.Query())
-	if err!=nil {
-		log.Println("400:", err)
+	params, errParse := parseParams(r.URL.Query())
+	if errParse!=nil {
+		log.Println("400:", errParse)
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("400: %v", err)))
+		w.Write([]byte(fmt.Sprintf("400: %v", errParse)))
 		return
 	}
 
+	w.Header().Set("Content-Type", "image/png")
+	imgPath := m.imagePath(params)
+	_, errCache := os.Stat(imgPath)
+	if errCache == nil {
+		content, errRead := ioutil.ReadFile(imgPath)
+		if errRead == nil {
+			w.Write(content)
+			return
+		}
+
+		log.Println("failed to read a cached image:", imgPath, errRead)
+	}
+
 	if (params.res == resolutions["small"]) || (params.res == resolutions["medium"]) {
-		sendImage(w, m.calculateImage(params))
+		img := m.calculateImage(params)
+		errEncode := png.Encode(w, img)
+		if errEncode != nil {
+			log.Println("failed to encode an image:", errEncode)
+		}
+		m.storeImage(imgPath, img)
 		return
 	}
 
 	channel := make(chan *image.Gray)
 	m.queue <- heavyRequest{params, channel}
-	sendImage(w, <- channel)
+	bigImg := <- channel
+	errEncodeBig := png.Encode(w, bigImg)
+	if errEncodeBig != nil {
+		log.Println("failed to encode an image:", errEncodeBig)
+	}
+	m.storeImage(imgPath, bigImg)
 }
 
-func sendImage(w http.ResponseWriter, img *image.Gray) {
-	w.Header().Set("Content-Type", "image/png")
-	err := png.Encode(w, img)
-	if err != nil {
-		log.Println("failed to encode an image:", err)
+func (m mandelbrot) storeImage(imgPath string, img *image.Gray) {
+	f, errCreateFile := os.Create(imgPath)
+	if errCreateFile != nil {
+		log.Println("failed to create an image file", imgPath, errCreateFile)
+	}
+	defer f.Close()
+
+	errWrite := png.Encode(f, img)
+	if errWrite != nil {
+		log.Println("failed to store an image", imgPath, errWrite)
 	}
 }
 
@@ -159,23 +191,16 @@ func parseRes(sRes string) (int, error) {
 }
 
 func (m mandelbrot) calculateImage(params params) *image.Gray {
-	img := image.NewGray(image.Rect(0, 0, params.res, params.res))
-	//imgNameParts := []string{
-	//	strconv.FormatFloat(params.x, 'E', -1, 64),
-	//	strconv.FormatFloat(params.y, 'E', -1, 64),
-	//	strconv.FormatUint(params.zoom, 10),
-	//	strconv.Itoa(params.res),
-	//}
-	//imgName := strings.Join(imgNameParts, "-")
-	//imgPath := filepath.Join(m.cacheDir, fmt.Sprintf("%s.png", imgName))
-	//f, err := os.Create("img.jpg")
-	//if err != nil {
-	//	panic(err)
-	//}
-	//defer f.Close()
-	//jpeg.Encode(f, target, nil)
-	//if err != nil {
-	//	log.Println("failed to store an image", imgPath, err)
-	//}
-	return img
+	return image.NewGray(image.Rect(0, 0, params.res, params.res))
+}
+
+func (m mandelbrot) imagePath(params params) string {
+	imgNameParts := []string{
+		strconv.FormatFloat(params.x, 'E', -1, 64),
+		strconv.FormatFloat(params.y, 'E', -1, 64),
+		strconv.FormatUint(params.zoom, 10),
+		strconv.Itoa(params.res),
+	}
+	imgName := fmt.Sprintf("%s.png", strings.Join(imgNameParts, "-"))
+	return filepath.Join(m.cacheDir, imgName)
 }
