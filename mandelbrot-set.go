@@ -21,9 +21,9 @@ import (
 	"time"
 )
 
-const maxIterations = 64
+const address = ":8080"
+const maxIterations = 255
 const connectionsCount = 20
-
 var resolutions = map[string]uint64{
 	"small":  64,
 	"medium": 512,
@@ -49,7 +49,7 @@ type mandelbrot struct {
 }
 
 func main() {
-	l, err := net.Listen("tcp", ":8080")
+	l, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("Listen: %v\n", err)
 	}
@@ -144,12 +144,12 @@ func (m mandelbrot) storeImage(imgPath string, img *image.Gray) {
 }
 
 func parseParams(q url.Values) (params, error) {
-	x, errX := parseX(q.Get("x"))
+	x, errX := parseCoord("x", q.Get("x"))
 	if errX != nil {
 		return params{}, errX
 	}
 
-	y, errY := parseY(q.Get("y"))
+	y, errY := parseCoord("y", q.Get("y"))
 	if errY != nil {
 		return params{}, errY
 	}
@@ -167,20 +167,15 @@ func parseParams(q url.Values) (params, error) {
 	return params{x, y, zoom, res}, nil
 }
 
-func parseX(sX string) (float64, error) {
-	x, err := strconv.ParseFloat(sX, 64)
+func parseCoord(name string, s string) (float64, error) {
+	c, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return x, errors.New("invalid x")
+		return c, errors.New(fmt.Sprintf("failed to parse %s", name))
 	}
-	return x, err
-}
-
-func parseY(sY string) (float64, error) {
-	y, err := strconv.ParseFloat(sY, 64)
-	if err != nil {
-		return y, errors.New("invalid y")
+	if c>2 || c<(-2) {
+		return c, errors.New(fmt.Sprintf("%s must be between -2.0 and 2.0", name))
 	}
-	return y, err
+	return c, err
 }
 
 func parseZoom(sZoom string) (uint64, error) {
@@ -206,13 +201,16 @@ func parseRes(sRes string) (uint64, error) {
 func (m mandelbrot) calculateImage(params params) *image.Gray {
 	img := image.NewGray(image.Rect(0, 0, int(params.res), int(params.res)))
 
-	delta := float64(params.res) / float64((2 * params.zoom))
+	delta := 2 / float64(params.zoom)
 	left := params.x - delta
 	top := params.y + delta
-	step := 1 / float64(params.zoom)
+	step := (2*delta) / float64(params.res)
+	optimalIterations := 5*math.Pow(math.Log10(float64(params.res)*float64(params.zoom)/4), 1.25)
+	iterations := int(math.Min(optimalIterations, maxIterations))
+	log.Println("iterations:", iterations)
 	for y := 0; y < int(params.res); y++ {
 		for x := 0; x < int(params.res); x++ {
-			if bailOut(complex(left+float64(x)*step, top-float64(y)*step)) {
+			if bailOut(iterations, complex(left+float64(x)*step, top-float64(y)*step)) {
 				img.Set(x, y, color.Gray{255})
 			} else {
 				img.Set(x, y, color.Gray{0})
@@ -222,9 +220,9 @@ func (m mandelbrot) calculateImage(params params) *image.Gray {
 	return img
 }
 
-func bailOut(c complex128) bool {
+func bailOut(iterations int, c complex128) bool {
 	z := c
-	for i := 0; i < maxIterations; i++ {
+	for i := 0; i < iterations; i++ {
 		if cmplx.Abs(z) > 2 {
 			return false
 		}
