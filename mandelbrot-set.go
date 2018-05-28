@@ -210,25 +210,23 @@ func (m mandelbrot) calculateImage(params params) *image.Gray {
 	log.Println("iterations:", iterations)
 	for y := 0; y < int(params.res); y++ {
 		for x := 0; x < int(params.res); x++ {
-			if bailOut(iterations, complex(left+float64(x)*step, top-float64(y)*step)) {
-				img.Set(x, y, color.Gray{255})
-			} else {
-				img.Set(x, y, color.Gray{0})
-			}
+			shade := bailOut(iterations, complex(left+float64(x)*step, top-float64(y)*step))
+			img.Set(x, y, color.Gray{shade})
 		}
 	}
 	return img
 }
 
-func bailOut(iterations int, c complex128) bool {
+func bailOut(iterations int, c complex128) uint8 {
 	z := c
-	for i := 0; i < iterations; i++ {
+	i := 1
+	for ; i < iterations; i++ {
 		if cmplx.Abs(z) > 2 {
-			return false
+			return uint8(math.Round(float64(i*maxIterations)/float64(iterations-1)))
 		}
 		z = cmplx.Pow(z, 2) + c
 	}
-	return true
+	return 255
 }
 
 func (m mandelbrot) imagePath(params params) string {
