@@ -226,7 +226,7 @@ func bailOut(iterations int, c complex128) uint8 {
 		}
 		z = cmplx.Pow(z, 2) + c
 	}
-	return 255
+	return 0
 }
 
 func (m mandelbrot) imagePath(params params) string {
