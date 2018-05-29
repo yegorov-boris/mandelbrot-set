@@ -24,6 +24,8 @@ import (
 
 const address = ":8080"
 const maxIterations = 255
+
+// Max concurrent http requests to limit memory usage.
 const connectionsCount = 50
 
 var resolutions = map[string]uint64{
@@ -62,10 +64,16 @@ func main() {
 		log.Fatalf("failed to create a deirectory to store the images: %v\n", errCache)
 	}
 	defer os.RemoveAll(cacheDir)
+
+	// Create a channel to process requests with "big" and "ultra" resolution in sequence.
+	// That should save resources for processing requests with "small" and "medium" resolution
 	heavyRequests := make(chan heavyRequest)
+
 	mandelbrot := mandelbrot{cacheDir, heavyRequests}
 
+	// Start a goroutine to process "big" and "ultra" in sequence.
 	go mandelbrot.heavyRequestsProcessor()
+
 	http.HandleFunc("/", mandelbrot.handler)
 	serverErr := http.Serve(l, nil)
 	if serverErr != nil {
@@ -76,6 +84,7 @@ func main() {
 
 func (m mandelbrot) heavyRequestsProcessor() {
 	for heavyRequest := range m.queue {
+		// Send a calculated image back to the handler.
 		heavyRequest.channel <- m.calculateImage(heavyRequest.params)
 	}
 }
@@ -90,6 +99,7 @@ func (m mandelbrot) handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "image/png")
+	// Send an already calculated image if exists.
 	imgPath := m.imagePath(params)
 	_, errCache := os.Stat(imgPath)
 	if errCache == nil {
@@ -218,6 +228,7 @@ func (m mandelbrot) calculateImage(params params) *image.Gray {
 	return img
 }
 
+// Check if a point is in the Mandelbrot set
 func bailOut(iterations int, c complex128) uint8 {
 	z := c
 	i := 1
@@ -227,9 +238,12 @@ func bailOut(iterations int, c complex128) uint8 {
 		}
 		z = cmplx.Pow(z, 2) + c
 	}
+
+	// A point is in the set.
 	return 0
 }
 
+// Encode query params in the name of an image.
 func (m mandelbrot) imagePath(params params) string {
 	imgNameParts := []string{
 		strconv.FormatFloat(params.x, 'E', -1, 64),
