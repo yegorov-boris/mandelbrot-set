@@ -14,3 +14,7 @@
 .idea/
 
 vendor/
+
+mandelbrot-set
+
+cache*

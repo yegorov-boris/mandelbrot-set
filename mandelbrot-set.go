@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	_ "github.com/mkevac/debugcharts"
 	"golang.org/x/net/netutil"
 	"image"
 	"image/color"
@@ -13,17 +14,18 @@ import (
 	"math/cmplx"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const address = ":8080"
 const maxIterations = 255
-const connectionsCount = 20
+const connectionsCount = 50
+
 var resolutions = map[string]uint64{
 	"small":  64,
 	"medium": 512,
@@ -74,7 +76,6 @@ func main() {
 
 func (m mandelbrot) heavyRequestsProcessor() {
 	for heavyRequest := range m.queue {
-		time.Sleep(20 * time.Second)
 		heavyRequest.channel <- m.calculateImage(heavyRequest.params)
 	}
 }
@@ -172,7 +173,7 @@ func parseCoord(name string, s string) (float64, error) {
 	if err != nil {
 		return c, errors.New(fmt.Sprintf("failed to parse %s", name))
 	}
-	if c>2 || c<(-2) {
+	if c > 2 || c < (-2) {
 		return c, errors.New(fmt.Sprintf("%s must be between -2.0 and 2.0", name))
 	}
 	return c, err
@@ -204,8 +205,8 @@ func (m mandelbrot) calculateImage(params params) *image.Gray {
 	delta := 2 / float64(params.zoom)
 	left := params.x - delta
 	top := params.y + delta
-	step := (2*delta) / float64(params.res)
-	optimalIterations := 5*math.Pow(math.Log10(float64(params.res)*float64(params.zoom)/4), 1.25)
+	step := (2 * delta) / float64(params.res)
+	optimalIterations := 5 * math.Pow(math.Log10(float64(params.res)*float64(params.zoom)/4), 1.25)
 	iterations := int(math.Min(optimalIterations, maxIterations))
 	log.Println("iterations:", iterations)
 	for y := 0; y < int(params.res); y++ {
@@ -222,7 +223,7 @@ func bailOut(iterations int, c complex128) uint8 {
 	i := 1
 	for ; i < iterations; i++ {
 		if cmplx.Abs(z) > 2 {
-			return uint8(math.Round(float64(i*maxIterations)/float64(iterations-1)))
+			return uint8(math.Round(float64(i*maxIterations) / float64(iterations-1)))
 		}
 		z = cmplx.Pow(z, 2) + c
 	}
